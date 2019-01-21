@@ -598,7 +598,6 @@ static struct bfq_group *__bfq_bic_change_cgroup(struct bfq_data *bfqd,
 	struct bfq_queue *sync_bfqq = bic_to_bfqq(bic, 1);
 	struct bfq_group *bfqg;
 	struct bfq_entity *entity;
-	struct bfq_group_data *bfqgd = blkcg_to_bfqgd(blkcg);
 
 	lockdep_assert_held(bfqd->queue->queue_lock);
 
@@ -621,17 +620,7 @@ static struct bfq_group *__bfq_bic_change_cgroup(struct bfq_data *bfqd,
 	}
 
 	if (sync_bfqq) {
-		sync_bfqq->weight_raise = bfqgd->weight_raise;
-		if (sync_bfqq->weight_raise == 2)
-			sync_bfqq->wr_coeff = max_t(unsigned int, sync_bfqq->wr_coeff, bfqd->bfq_wr_coeff * sync_bfqq->weight_raise);
-		else if (sync_bfqq->weight_raise == 1)
-			sync_bfqq->wr_coeff = bfqd->bfq_wr_coeff;
-		else
-			sync_bfqq->wr_coeff = 1;
-		sync_bfqq->entity.new_weight = bfqgd->weight;
-		sync_bfqq->entity.prio_changed = 1;
 		entity = &sync_bfqq->entity;
-
 		if (entity->sched_data != &bfqg->sched_data)
 			bfq_bfqq_move(bfqd, sync_bfqq, bfqg);
 	}
@@ -882,53 +871,6 @@ static ssize_t bfq_io_set_weight(struct kernfs_open_file *of,
 	return bfq_io_set_weight_legacy(of_css(of), NULL, weight);
 }
 
-static int bfq_io_show_weight_raise(struct seq_file *sf, void *v)
-{
-	struct blkcg *blkcg = css_to_blkcg(seq_css(sf));
-	struct bfq_group_data *bfqgd = blkcg_to_bfqgd(blkcg);
-	unsigned int val = 0;
-
-	if (bfqgd)
-		val = bfqgd->weight_raise;
-
-	seq_printf(sf, "%u\n", val);
-
-	return 0;
-}
-
-static int bfq_io_set_weight_raise_legacy(struct cgroup_subsys_state *css,
-				    struct cftype *cftype,
-				    u64 val)
-{
-	struct blkcg *blkcg = css_to_blkcg(css);
-	struct bfq_group_data *bfqgd = blkcg_to_bfqgd(blkcg);
-	int ret = -ERANGE;
-
-	if (val < 0)
-		return ret;
-
-	ret = 0;
-	spin_lock_irq(&blkcg->lock);
-	bfqgd->weight_raise = (unsigned short)val;
-	spin_unlock_irq(&blkcg->lock);
-
-	return ret;
-}
-
-static ssize_t bfq_io_set_weight_raise(struct kernfs_open_file *of,
-				 char *buf, size_t nbytes,
-				 loff_t off)
-{
-	u64 weight_raise;
-	/* First unsigned long found in the file is used */
-	int ret = kstrtoull(strim(buf), 0, &weight_raise);
-
-	if (ret)
-		return ret;
-
-	return bfq_io_set_weight_raise_legacy(of_css(of), NULL, weight_raise);
-}
-
 static int bfqg_print_stat(struct seq_file *sf, void *v)
 {
 	blkcg_print_blkgs(sf, css_to_blkcg(seq_css(sf)), blkg_prfill_stat,
@@ -1053,11 +995,6 @@ static struct cftype bfq_blkcg_legacy_files[] = {
 		.seq_show = bfq_io_show_weight,
 		.write_u64 = bfq_io_set_weight_legacy,
 	},
-	{
-		.name = "bfq.weight_raise",
-		.seq_show = bfq_io_show_weight_raise,
-		.write_u64 = bfq_io_set_weight_raise_legacy,
-	},
 	/* statistics, covers only the tasks in the bfqg */
 	{
 		.name = "bfq.time",
@@ -1172,11 +1109,6 @@ static struct cftype bfq_blkg_files[] = {
 		.flags = CFTYPE_NOT_ON_ROOT,
 		.seq_show = bfq_io_show_weight,
 		.write = bfq_io_set_weight,
-	},
-	{
-		.name = "bfq.weight_raise",
-		.seq_show = bfq_io_show_weight_raise,
-		.write = bfq_io_set_weight_raise,
 	},
 	{} /* terminate */
 };
